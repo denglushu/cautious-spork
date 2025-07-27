@@ -8,7 +8,7 @@ async function handleRequest(request) {
   const correctPassword = "888";
 
   if (inputPassword !== correctPassword) {
-    return new Response(JSON.stringify("密码错误"), {
+    return new Response(JSON.stringify('密码错误'), {
       status: 401,
       headers: { 
         'Content-Type': 'application/json; charset=utf-8' // 修复乱码
