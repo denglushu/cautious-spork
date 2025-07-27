@@ -8,18 +8,20 @@ async function handleRequest(request) {
   const correctPassword = "888";
 
   if (inputPassword !== correctPassword) {
-    return new Response(JSON.stringify('密码错误'), {
+    return new Response("密码错误", {
       status: 401,
-      headers: { 
-        'Content-Type': 'application/json; charset=utf-8' // 修复乱码
-      },
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
   }
 
-  const fruits = ["1636983341", "573776258", "mar4pis"];
-  return new Response(JSON.stringify(fruits), {
-    headers: { 
-      'Content-Type': 'application/json; charset=utf-8' // 修复乱码
-    },
+  // 从 KV 获取数据（如果没有，返回默认值）
+  let fruits = await FRUIT_DATA.get("fruits");
+  if (!fruits) {
+    fruits = JSON.stringify(["1636983341", "573776258", "mar4pis"]); // 默认数据
+    await FRUIT_DATA.put("fruits", fruits); // 存储到 KV
+  }
+
+  return new Response(fruits, {
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
 }
