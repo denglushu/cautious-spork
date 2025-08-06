@@ -4,19 +4,18 @@ addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
 
+// 修改 handleRequest 函数以传递 event
 async function handleRequest(request) {
   const url = new URL(request.url)
   
-  // 如果是AJAX请求，返回处理后的内容
   if (url.searchParams.has('getContent')) {
-    return await generateContent()
+    return await generateContent(event)  // 传递 event
   }
   
-  // 否则返回加载页面
-  return new Response(loadingPage(), {
+  return new Response(loadingPageHtml, {
     headers: { 
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-cache' // 禁用缓存确保获取最新内容
+      'Cache-Control': 'no-cache'
     }
   })
 }
@@ -118,21 +117,6 @@ async function generateContent(event) {  // 添加 event 参数
   }
 }
 
-// 修改 handleRequest 函数以传递 event
-async function handleRequest(request) {
-  const url = new URL(request.url)
-  
-  if (url.searchParams.has('getContent')) {
-    return await generateContent(event)  // 传递 event
-  }
-  
-  return new Response(loadingPageHtml, {
-    headers: { 
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-cache'
-    }
-  })
-}
 
 // 优化后的链接提取函数
 function extractLinks(html) {
