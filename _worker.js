@@ -9,8 +9,26 @@ async function handleRequest(request) {
     return await generateContent()
   }
   
+  if (url.searchParams.has('progress')) {
+    return handleProgressRequest()
+  }
+  
   return new Response(loadingPage(), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  })
+}
+
+// 存储处理进度
+let progress = {
+  total: 0,
+  processed: 0,
+  current: '',
+  links: []
+}
+
+async function handleProgressRequest() {
+  return new Response(JSON.stringify(progress), {
+    headers: { 'Content-Type': 'application/json' }
   })
 }
 
@@ -42,6 +60,8 @@ function loadingPage() {
         .loading-container {
             text-align: center;
             padding: 2rem;
+            max-width: 500px;
+            width: 100%;
         }
         
         .loader {
@@ -64,9 +84,48 @@ function loadingPage() {
             font-weight: 500;
         }
         
+        .progress-container {
+            width: 100%;
+            background: #e9ecef;
+            border-radius: 20px;
+            margin: 1rem 0;
+            height: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: #4361ee;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
         .progress-text {
             margin-top: 1rem;
             color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .current-task {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #495057;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+        }
+        
+        .stat {
+            color: #495057;
         }
     </style>
 </head>
@@ -74,21 +133,76 @@ function loadingPage() {
     <div class='loading-container'>
         <div class='loader'></div>
         <h1>正在处理链接...</h1>
-        <p class='progress-text'>请稍候，这可能需要一些时间</p>
+        
+        <div class='progress-container'>
+            <div class='progress-bar' id='progressBar'></div>
+        </div>
+        
+        <div class='progress-text'>
+            <span id='progressText'>0%</span> 完成
+        </div>
+        
+        <div class='current-task' id='currentTask'>
+            初始化中...
+        </div>
+        
+        <div class='stats'>
+            <div class='stat'>已处理: <span id='processed'>0</span></div>
+            <div class='stat'>总计: <span id='total'>0</span></div>
+        </div>
     </div>
     
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            fetch(window.location.href + '?getContent=true')
-                .then(response => response.text())
-                .then(html => {
-                    document.open();
-                    document.write(html);
-                    document.close();
-                })
+        let progressInterval;
+        
+        function updateProgress(data) {
+            const progressPercent = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+            
+            document.getElementById('progressBar').style.width = progressPercent + '%';
+            document.getElementById('progressText').textContent = progressPercent + '%';
+            document.getElementById('currentTask').textContent = data.current || '处理中...';
+            document.getElementById('processed').textContent = data.processed;
+            document.getElementById('total').textContent = data.total;
+            
+            // 如果处理完成，跳转到结果页面
+            if (data.processed >= data.total && data.total > 0) {
+                clearInterval(progressInterval);
+                setTimeout(() => {
+                    fetch(window.location.href + '?getContent=true')
+                        .then(response => response.text())
+                        .then(html => {
+                            document.open();
+                            document.write(html);
+                            document.close();
+                        })
+                        .catch(error => {
+                            document.querySelector('h1').textContent = '加载失败';
+                            document.querySelector('.progress-text').textContent = '错误: ' + error.message;
+                        });
+                }, 1000);
+            }
+        }
+        
+        function fetchProgress() {
+            fetch(window.location.href + '?progress=true')
+                .then(response => response.json())
+                .then(updateProgress)
                 .catch(error => {
-                    document.querySelector('h1').textContent = '加载失败';
-                    document.querySelector('.progress-text').textContent = '错误: ' + error.message;
+                    console.error('获取进度失败:', error);
+                });
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // 先获取一次进度
+            fetchProgress();
+            
+            // 然后每1秒获取一次进度
+            progressInterval = setInterval(fetchProgress, 1000);
+            
+            // 同时开始获取内容
+            fetch(window.location.href + '?getContent=true')
+                .catch(error => {
+                    console.error('初始化请求失败:', error);
                 });
         });
     </script>
@@ -98,6 +212,14 @@ function loadingPage() {
 
 async function generateContent() {
   try {
+    // 初始化进度
+    progress = {
+      total: 0,
+      processed: 0,
+      current: '正在获取目标网页...',
+      links: []
+    }
+    
     const targetUrl = 'https://site.ip138.com/'
     const response = await fetch(targetUrl, {
       headers: {
@@ -109,10 +231,18 @@ async function generateContent() {
       throw new Error(`HTTP错误: ${response.status}`)
     }
     
+    progress.current = '正在解析网页内容...'
     const html = await response.text()
     const links = extractLinks(html)
     const uniqueLinks = [...new Set(links)] // 去重
-    const verifiedLinks = await verifyLinks(uniqueLinks.slice(0, 20)) // 限制验证数量
+    
+    // 限制处理数量
+    const linksToProcess = uniqueLinks.slice(0, 20)
+    progress.total = linksToProcess.length
+    progress.links = linksToProcess
+    
+    // 验证链接
+    const verifiedLinks = await verifyLinks(linksToProcess)
     
     return new Response(buildFinalHtml(verifiedLinks), {
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -145,18 +275,32 @@ function extractLinks(html) {
 async function verifyLinks(links) {
   const verifiedLinks = []
   
-  const batchSize = 5
+  const batchSize = 3 // 减少批量大小以获得更平滑的进度更新
   for (let i = 0; i < links.length; i += batchSize) {
     const batch = links.slice(i, i + batchSize)
+    
+    // 更新进度
+    progress.processed = i
+    progress.current = `正在验证: ${batch[0]}...`
+    
     const batchResults = await Promise.all(batch.map(verifySingleLink))
     verifiedLinks.push(...batchResults.filter(link => link !== null))
+    
+    // 更新进度
+    progress.processed = Math.min(i + batchSize, links.length)
   }
+  
+  // 处理完成
+  progress.processed = links.length
+  progress.current = '正在生成最终结果...'
   
   return verifiedLinks
 }
 
 async function verifySingleLink(domain) {
   try {
+    progress.current = `正在验证: ${domain}`
+    
     const url = `https://${domain}`
     const response = await fetch(url, {
       redirect: 'follow',
@@ -413,6 +557,14 @@ function buildFinalHtml(links) {
                 <div class='stat-value'>${validLinks.length}</div>
                 <div class='stat-label'>有效链接</div>
             </div>
+            <div class='stat-card'>
+                <div class='stat-value'>${links.length - validLinks.length}</div>
+                <div class='stat-label'>无效链接</div>
+            </div>
+            <div class='stat-card'>
+                <div class='stat-value'>${links.length}</div>
+                <div class='stat-label'>总计</div>
+            </div>
         </div>
 
         <div class='links-container'>
@@ -444,11 +596,16 @@ function buildFinalHtml(links) {
         </div>
 
         <div class='footer'>
-            <p>生成于 ${dateStr} | 共处理 ${links.length} 个链接</p>
+            <p>生成于 ${dateStr} | 处理耗时: ${calculateProcessingTime()}秒</p>
         </div>
     </div>
 </body>
 </html>`
+}
+
+function calculateProcessingTime() {
+  const startTime = progress.startTime || Date.now()
+  return ((Date.now() - startTime) / 1000).toFixed(2)
 }
 
 function escapeHtml(unsafe) {
