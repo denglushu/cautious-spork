@@ -635,9 +635,9 @@ return ((Date.now() - startTime) / 1000).toFixed(2);
 function escapeHtml(unsafe) {
 if (!unsafe) return '';
 return unsafe.toString()
-.replace(/&/g, "&")
-.replace(/</g, "<")
-.replace(/>/g, ">")
-.replace(/"/g, """)
-.replace(/'/g, "'");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
 }
