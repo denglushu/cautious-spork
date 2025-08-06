@@ -5,12 +5,10 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   const url = new URL(request.url)
   
-  // 如果是AJAX请求，返回处理后的内容
   if (url.searchParams.has('getContent')) {
     return await generateContent()
   }
   
-  // 否则返回加载页面
   return new Response(loadingPage(), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' }
   })
@@ -128,17 +126,15 @@ async function generateContent() {
 }
 
 function extractLinks(html) {
-  // 使用正则表达式提取域名
   const domainRegex = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})(?:\/|$)/g
   const matches = []
   let match
   
   while ((match = domainRegex.exec(html)) !== null) {
-    matches.push(match[1]) // 提取主域名部分
+    matches.push(match[1])
   }
   
   return matches.filter(domain => {
-    // 过滤掉常见非域名和无效域名
     const invalidParts = ['javascript:', 'mailto:', 'tel:', '#', 'data:', 'about:']
     return !invalidParts.some(part => domain.startsWith(part)) &&
            domain.includes('.') &&
@@ -149,7 +145,6 @@ function extractLinks(html) {
 async function verifyLinks(links) {
   const verifiedLinks = []
   
-  // 并行验证链接（限制并发数）
   const batchSize = 5
   for (let i = 0; i < links.length; i += batchSize) {
     const batch = links.slice(i, i + batchSize)
@@ -165,7 +160,7 @@ async function verifySingleLink(domain) {
     const url = `https://${domain}`
     const response = await fetch(url, {
       redirect: 'follow',
-      timeout: 3000, // 3秒超时
+      timeout: 3000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
@@ -185,28 +180,12 @@ async function verifySingleLink(domain) {
     const titleMatch = html.match(/<title>(.*?)<\/title>/i)
     const title = titleMatch ? titleMatch[1].trim() : '无标题'
     
-    // 获取网站快照
-    let screenshotUrl = null
-    try {
-      const screenshotApiUrl = `https://v2.xxapi.cn/api/screenshot?url=${encodeURIComponent(url)}&return=302`
-      const screenshotResponse = await fetch(screenshotApiUrl, {
-        redirect: 'manual' // 手动处理重定向
-      })
-      
-      if (screenshotResponse.status === 302) {
-        screenshotUrl = screenshotResponse.headers.get('location')
-      }
-    } catch (e) {
-      console.error('获取快照失败:', e)
-    }
-    
     return {
       domain,
       url,
       valid: true,
       title: title.length > 50 ? `${title.substring(0, 50)}...` : title,
-      error: null,
-      screenshot: screenshotUrl
+      error: null
     }
   } catch (error) {
     return {
@@ -214,8 +193,7 @@ async function verifySingleLink(domain) {
       url: `https://${domain}`,
       valid: false,
       title: '验证失败',
-      error: error.message,
-      screenshot: null
+      error: error.message
     }
   }
 }
@@ -381,26 +359,23 @@ function buildFinalHtml(links) {
             border-radius: 0.25rem;
             overflow: hidden;
             position: relative;
+            height: 200px;
         }
 
-        .screenshot-image {
+        .screenshot-iframe {
             width: 100%;
-            height: auto;
-            display: block;
-            transition: opacity 0.3s ease;
+            height: 100%;
+            border: none;
+            background: #f1f3f5;
         }
 
         .screenshot-placeholder {
             background: #f1f3f5;
-            height: 150px;
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
             color: var(--text-secondary);
-        }
-
-        .screenshot-container:hover .screenshot-image {
-            opacity: 0.9;
         }
 
         .footer {
@@ -452,12 +427,15 @@ function buildFinalHtml(links) {
                         ${link.error ? `<p class='link-description'>错误: ${escapeHtml(link.error)}</p>` : ''}
                         
                         <div class='screenshot-container'>
-                            ${link.screenshot ? `
-                                <a href='${escapeHtml(link.screenshot)}' target='_blank'>
-                                    <img src='${escapeHtml(link.screenshot)}' alt='${escapeHtml(link.domain)} 网站快照' class='screenshot-image' loading='lazy'>
-                                </a>
+                            ${link.valid ? `
+                                <iframe 
+                                    src='${escapeHtml(link.url)}' 
+                                    class='screenshot-iframe' 
+                                    sandbox='allow-same-origin allow-scripts allow-popups allow-forms'
+                                    loading='lazy'
+                                ></iframe>
                             ` : `
-                                <div class='screenshot-placeholder'>无可用快照</div>
+                                <div class='screenshot-placeholder'>无法加载预览</div>
                             `}
                         </div>
                     </div>
@@ -473,7 +451,6 @@ function buildFinalHtml(links) {
 </html>`
 }
 
-// 辅助函数：HTML转义
 function escapeHtml(unsafe) {
   if (!unsafe) return ''
   return unsafe.toString()
