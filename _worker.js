@@ -73,7 +73,7 @@ function loadingPage() {
 </html>`
 }
 
-async function generateContent() {
+async function generateContent(event) {  // 添加 event 参数
   try {
     const targetUrl = 'https://site.ip138.com/'
     const response = await fetch(targetUrl, {
@@ -82,7 +82,7 @@ async function generateContent() {
         'Accept': 'text/html'
       },
       cf: {
-        cacheTtl: 3600, // 缓存1小时
+        cacheTtl: 3600,
         cacheEverything: true
       }
     })
@@ -93,16 +93,16 @@ async function generateContent() {
     
     const html = await response.text()
     const links = extractLinks(html)
-    const uniqueLinks = [...new Set(links)] // 去重
+    const uniqueLinks = [...new Set(links)]
     
-    // 直接返回结果，不等待所有链接验证完成
     const finalHtml = buildFinalHtml([], uniqueLinks.length)
     
-    // 在返回响应后继续验证链接
-    event.waitUntil((async () => {
-      const verifiedLinks = await verifyLinks(uniqueLinks.slice(0, 20)) // 限制验证数量
-      // 可以在这里存储验证结果或发送到其他服务
-    })())
+    if (event) {  // 检查 event 是否存在
+      event.waitUntil((async () => {
+        const verifiedLinks = await verifyLinks(uniqueLinks.slice(0, 20))
+        // 可以在这里存储验证结果或发送到其他服务
+      })())
+    }
     
     return new Response(finalHtml, {
       headers: { 
@@ -116,6 +116,22 @@ async function generateContent() {
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
     })
   }
+}
+
+// 修改 handleRequest 函数以传递 event
+async function handleRequest(request) {
+  const url = new URL(request.url)
+  
+  if (url.searchParams.has('getContent')) {
+    return await generateContent(event)  // 传递 event
+  }
+  
+  return new Response(loadingPageHtml, {
+    headers: { 
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache'
+    }
+  })
 }
 
 // 优化后的链接提取函数
