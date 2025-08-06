@@ -1,27 +1,21 @@
-// Cloudflare Worker 优化实现 - 链接提取器
-
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
 
-// 修改 handleRequest 函数以传递 event
 async function handleRequest(request) {
   const url = new URL(request.url)
   
+  // 如果是AJAX请求，返回处理后的内容
   if (url.searchParams.has('getContent')) {
-    return await generateContent(event)  // 传递 event
+    return await generateContent()
   }
   
-  return new Response(loadingPageHtml, {
-    headers: { 
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-cache'
-    }
+  // 否则返回加载页面
+  return new Response(loadingPage(), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
   })
 }
 
-// 缓存加载页面函数结果
-const loadingPageHtml = loadingPage();
 function loadingPage() {
   return `<!DOCTYPE html>
 <html lang='zh-CN'>
@@ -30,20 +24,52 @@ function loadingPage() {
     <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f8f9fa; height: 100vh; display: flex; justify-content: center; align-items: center;
-            flex-direction: column; color: #4361ee;
+            background: #f8f9fa;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: #4361ee;
         }
-        .loading-container { text-align: center; padding: 2rem; }
+        
+        .loading-container {
+            text-align: center;
+            padding: 2rem;
+        }
+        
         .loader {
-            width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #4361ee;
-            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem;
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #4361ee;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
         }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        h1 { margin-bottom: 1rem; font-weight: 500; }
-        .progress-text { margin-top: 1rem; color: #6c757d; }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        h1 {
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+        
+        .progress-text {
+            margin-top: 1rem;
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
@@ -72,17 +98,12 @@ function loadingPage() {
 </html>`
 }
 
-async function generateContent(event) {  // 添加 event 参数
+async function generateContent() {
   try {
     const targetUrl = 'https://site.ip138.com/'
     const response = await fetch(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html'
-      },
-      cf: {
-        cacheTtl: 3600,
-        cacheEverything: true
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
     })
     
@@ -92,22 +113,11 @@ async function generateContent(event) {  // 添加 event 参数
     
     const html = await response.text()
     const links = extractLinks(html)
-    const uniqueLinks = [...new Set(links)]
+    const uniqueLinks = [...new Set(links)] // 去重
+    const verifiedLinks = await verifyLinks(uniqueLinks.slice(0, 20)) // 限制验证数量
     
-    const finalHtml = buildFinalHtml([], uniqueLinks.length)
-    
-    if (event) {  // 检查 event 是否存在
-      event.waitUntil((async () => {
-        const verifiedLinks = await verifyLinks(uniqueLinks.slice(0, 20))
-        // 可以在这里存储验证结果或发送到其他服务
-      })())
-    }
-    
-    return new Response(finalHtml, {
-      headers: { 
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache'
-      }
+    return new Response(buildFinalHtml(verifiedLinks), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
     })
   } catch (error) {
     return new Response(`<h1>处理错误</h1><p>${error.message}</p>`, {
@@ -117,56 +127,49 @@ async function generateContent(event) {  // 添加 event 参数
   }
 }
 
-
-// 优化后的链接提取函数
 function extractLinks(html) {
-  const domainRegex = /https?:\/\/(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})(?:\/|$)/g
-  const matches = new Set()
+  // 使用正则表达式提取域名
+  const domainRegex = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})(?:\/|$)/g
+  const matches = []
   let match
   
   while ((match = domainRegex.exec(html)) !== null) {
-    const domain = match[1]
-    // 快速过滤无效域名
-    if (domain.length > 3 && domain.includes('.') && !domain.startsWith('data:') && !domain.startsWith('about:')) {
-      matches.add(domain)
-    }
+    matches.push(match[1]) // 提取主域名部分
   }
   
-  return Array.from(matches)
+  return matches.filter(domain => {
+    // 过滤掉常见非域名和无效域名
+    const invalidParts = ['javascript:', 'mailto:', 'tel:', '#', 'data:', 'about:']
+    return !invalidParts.some(part => domain.startsWith(part)) &&
+           domain.includes('.') &&
+           domain.length > 3
+  })
 }
 
-// 并行验证链接
 async function verifyLinks(links) {
-  const batchSize = 5
-  const results = []
+  const verifiedLinks = []
   
+  // 并行验证链接（限制并发数）
+  const batchSize = 5
   for (let i = 0; i < links.length; i += batchSize) {
     const batch = links.slice(i, i + batchSize)
-    const batchPromises = batch.map(link => verifySingleLink(link).catch(() => null))
-    const batchResults = await Promise.all(batchPromises)
-    results.push(...batchResults.filter(Boolean))
+    const batchResults = await Promise.all(batch.map(verifySingleLink))
+    verifiedLinks.push(...batchResults.filter(link => link !== null))
   }
   
-  return results
+  return verifiedLinks
 }
 
-// 优化单个链接验证
 async function verifySingleLink(domain) {
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
-    
     const url = `https://${domain}`
     const response = await fetch(url, {
       redirect: 'follow',
-      signal: controller.signal,
+      timeout: 3000, // 3秒超时
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
     })
-    
-    clearTimeout(timeout)
     
     if (!response.ok) {
       return {
@@ -178,17 +181,32 @@ async function verifySingleLink(domain) {
       }
     }
     
-    // 只读取部分内容来提取标题
-    const text = await response.text()
-    const titleMatch = text.match(/<title>(.*?)<\/title>/i)
-    const title = titleMatch ? titleMatch[1].trim().substring(0, 50) : '无标题'
+    const html = await response.text()
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i)
+    const title = titleMatch ? titleMatch[1].trim() : '无标题'
+    
+    // 获取网站快照
+    let screenshotUrl = null
+    try {
+      const screenshotApiUrl = `https://v2.xxapi.cn/api/screenshot?url=${encodeURIComponent(url)}&return=302`
+      const screenshotResponse = await fetch(screenshotApiUrl, {
+        redirect: 'manual' // 手动处理重定向
+      })
+      
+      if (screenshotResponse.status === 302) {
+        screenshotUrl = screenshotResponse.headers.get('location')
+      }
+    } catch (e) {
+      console.error('获取快照失败:', e)
+    }
     
     return {
       domain,
       url,
       valid: true,
-      title: title.length > 50 ? `${title}...` : title,
-      error: null
+      title: title.length > 50 ? `${title.substring(0, 50)}...` : title,
+      error: null,
+      screenshot: screenshotUrl
     }
   } catch (error) {
     return {
@@ -196,68 +214,215 @@ async function verifySingleLink(domain) {
       url: `https://${domain}`,
       valid: false,
       title: '验证失败',
-      error: error.message
+      error: error.message,
+      screenshot: null
     }
   }
 }
 
-// 优化HTML生成
-const finalHtmlCache = new Map()
-function buildFinalHtml(links = [], totalLinks = 0) {
-  const dateStr = new Date().toLocaleString('zh-CN')
-  const cacheKey = `${links.length}-${totalLinks}`
-  
-  if (finalHtmlCache.has(cacheKey)) {
-    return finalHtmlCache.get(cacheKey)
-  }
-  
+function buildFinalHtml(links) {
   const validLinks = links.filter(link => link.valid)
-  const html = `<!DOCTYPE html>
+  const dateStr = new Date().toLocaleString('zh-CN')
+  
+  return `<!DOCTYPE html>
 <html lang='zh-CN'>
 <head>
     <title>提取的有效网址链接及标题</title>
     <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>
     <style>
         :root {
-            --primary-color: #4361ee; --primary-hover: #3a56d4; --text-color: #2b2d42;
-            --text-secondary: #6c757d; --light-bg: #f8f9fa; --card-bg: #ffffff;
-            --border-color: #e9ecef; --success-color: #4cc9f0; --error-color: #f72585;
+            --primary-color: #4361ee;
+            --primary-hover: #3a56d4;
+            --text-color: #2b2d42;
+            --text-secondary: #6c757d;
+            --light-bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --border-color: #e9ecef;
+            --success-color: #4cc9f0;
+            --error-color: #f72585;
             --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             --radius: 0.5rem;
         }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            line-height: 1.6; color: var(--text-color); background-color: var(--light-bg); padding: 2rem;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--light-bg);
+            padding: 2rem;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
-        header { text-align: center; margin-bottom: 2.5rem; }
-        h1 { font-size: 2rem; font-weight: 700; color: var(--primary-color); margin-bottom: 0.5rem; }
-        .subtitle { color: var(--text-secondary); font-size: 1rem; }
-        .stats { display: flex; justify-content: center; gap: 1rem; margin-bottom: 2rem; }
-        .stat-card { background: var(--card-bg); padding: 1rem 1.5rem; border-radius: var(--radius); 
-            box-shadow: var(--shadow); text-align: center; min-width: 120px; }
-        .stat-value { font-size: 1.5rem; font-weight: 600; color: var(--primary-color); }
-        .stat-label { font-size: 0.875rem; color: var(--text-secondary); }
-        .links-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1.5rem; }
-        .link-card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); 
-            overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease; }
-        .link-card:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
-        .link-header { padding: 1rem 1.5rem; background: var(--primary-color); color: white; }
-        .link-title { font-weight: 600; font-size: 1.1rem; margin-bottom: 0.25rem; 
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .link-url { font-size: 0.8rem; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .link-body { padding: 1.25rem 1.5rem; }
-        .link-text { display: inline-block; color: var(--primary-color); font-weight: 500; 
-            text-decoration: none; margin-bottom: 0.75rem; transition: color 0.2s ease; }
-        .link-text:hover { color: var(--primary-hover); text-decoration: underline; }
-        .link-description { color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5; }
-        .footer { text-align: center; margin-top: 3rem; color: var(--text-secondary); font-size: 0.875rem; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 1rem 1.5rem;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            text-align: center;
+            min-width: 120px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .links-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .link-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .link-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .link-header {
+            padding: 1rem 1.5rem;
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .link-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .link-url {
+            font-size: 0.8rem;
+            opacity: 0.9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .link-body {
+            padding: 1.25rem 1.5rem;
+        }
+
+        .link-text {
+            display: inline-block;
+            color: var(--primary-color);
+            font-weight: 500;
+            text-decoration: none;
+            margin-bottom: 0.75rem;
+            transition: color 0.2s ease;
+        }
+
+        .link-text:hover {
+            color: var(--primary-hover);
+            text-decoration: underline;
+        }
+
+        .link-description {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+
+        .screenshot-container {
+            margin-top: 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.25rem;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .screenshot-image {
+            width: 100%;
+            height: auto;
+            display: block;
+            transition: opacity 0.3s ease;
+        }
+
+        .screenshot-placeholder {
+            background: #f1f3f5;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+        }
+
+        .screenshot-container:hover .screenshot-image {
+            opacity: 0.9;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 3rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
         @media (max-width: 768px) {
-            body { padding: 1rem; }
-            .links-container { grid-template-columns: 1fr; }
-            .stats { flex-direction: column; align-items: center; }
+            body {
+                padding: 1rem;
+            }
+            
+            .links-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats {
+                flex-direction: column;
+                align-items: center;
+            }
         }
     </style>
 </head>
@@ -285,24 +450,31 @@ function buildFinalHtml(links = [], totalLinks = 0) {
                     <div class='link-body'>
                         <a href='${escapeHtml(link.url)}' target='_blank' class='link-text'>${escapeHtml(link.domain)}</a>
                         ${link.error ? `<p class='link-description'>错误: ${escapeHtml(link.error)}</p>` : ''}
+                        
+                        <div class='screenshot-container'>
+                            ${link.screenshot ? `
+                                <a href='${escapeHtml(link.screenshot)}' target='_blank'>
+                                    <img src='${escapeHtml(link.screenshot)}' alt='${escapeHtml(link.domain)} 网站快照' class='screenshot-image' loading='lazy'>
+                                </a>
+                            ` : `
+                                <div class='screenshot-placeholder'>无可用快照</div>
+                            `}
+                        </div>
                     </div>
                 </div>
             `).join('')}
         </div>
 
         <div class='footer'>
-            <p>生成于 ${dateStr} | 共处理 ${totalLinks} 个链接</p>
+            <p>生成于 ${dateStr} | 共处理 ${links.length} 个链接</p>
         </div>
     </div>
 </body>
 </html>`
-  
-  finalHtmlCache.set(cacheKey, html)
-  return html
 }
 
-// 优化HTML转义函数
-const escapeHtml = (unsafe) => {
+// 辅助函数：HTML转义
+function escapeHtml(unsafe) {
   if (!unsafe) return ''
   return unsafe.toString()
     .replace(/&/g, "&amp;")
